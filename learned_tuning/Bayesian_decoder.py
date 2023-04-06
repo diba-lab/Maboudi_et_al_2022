@@ -1,5 +1,4 @@
 import numpy as np
-import pdb
 
 def calculate_posterior_probability(spike_counts, log_tunings, tuning_summation):
 
@@ -12,7 +11,6 @@ def calculate_posterior_probability(spike_counts, log_tunings, tuning_summation)
     
     log_pr += np.tile(np.transpose(tuning_summation[np.newaxis,:], (1, 0)), [1, num_time_bins])
     
-    #log_pr = np.transpose(log_pr, (2, 1, 0))
     post_pr = np.exp(log_pr)
 
     return post_pr
@@ -67,7 +65,6 @@ def Bayesian_decoder(spike_count_by_time_bin, place_fields, time_bin_duration):
         
         for ii in range(n_parts):
             curr_time_bins  = np.arange((ii*max_num_bin_in_part), min((ii+1)*max_num_bin_in_part, num_time_bins))
-            num_curr_time_bins = curr_time_bins.size
             
             curr_post_pr = calculate_posterior_probability(spike_count_by_time_bin[:, curr_time_bins], log_tunings, tuning_summation)
 
