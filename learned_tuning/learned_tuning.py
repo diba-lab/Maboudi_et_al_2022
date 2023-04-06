@@ -150,3 +150,94 @@ def calculate_learned_tuning(PBEs, spikes, L_ratios, time_bin_duration):
             learned_tunings[curr_unit, :] = cal_unit_learned_tuning(posterior_prob, unit_PBE_spike_counts_concat)
 
     return learned_tunings
+
+
+def calculate_all_column_correlations(matrix1, matrix2):
+    """
+    Calculates the correlation between each column of the first matrix with every other column of the second matrix,
+    and stores the correlation coefficients in an output matrix.
+
+    Args:
+        matrix1 (np.ndarray): The first matrix.
+        matrix2 (np.ndarray): The second matrix.
+
+    Returns:
+        np.ndarray: A 2-dimensional array containing the correlation coefficients between each column of the first matrix
+                    and every other column of the second matrix. The shape of the output matrix is (n, m), where n is the
+                    number of columns in the first matrix, and m is the number of columns in the second matrix.
+    """
+    # Check if the input matrices have the same number of columns
+    if matrix1.shape[1] != matrix2.shape[1]:
+        raise ValueError("Input matrices must have the same number of columns")
+
+    # Initialize an empty matrix to store the correlation coefficients
+    correlations = np.empty((matrix1.shape[1], matrix2.shape[1]))
+
+    # Loop through each column of the first matrix
+    for i in range(matrix1.shape[1]):
+        # Select the column of interest from the first matrix
+        column1 = matrix1[:, i]
+
+        # Loop through each column of the second matrix and calculate the correlation
+        for j in range(matrix2.shape[1]):
+            corr = np.corrcoef(column1, matrix2[:, j])[0, 1]
+            correlations[i, j] = corr
+
+    return correlations
+
+import numpy as np
+
+def random_column_sampling(matrix):
+    """
+    Randomly samples a column for each row of a given matrix.
+
+    Args:
+        matrix (np.ndarray): The input matrix.
+
+    Returns:
+        np.ndarray: A 1-dimensional array containing the randomly sampled values from the columns of the input matrix.
+                    The length of the output array is equal to the number of rows in the input matrix.
+    """
+    # Get the number of rows in the input matrix
+    num_rows = matrix.shape[0]
+
+    # Generate random column indices for each row
+    column_indices = np.random.randint(0, matrix.shape[1], num_rows)
+
+    # Extract the values at the randomly sampled column indices for each row
+    sampled_values = matrix[np.arange(num_rows), column_indices]
+
+    return sampled_values
+
+
+
+def calculate_place_field_fidelity_of_learned_tuning(learned_tunings, place_fields, num_shuffles):
+
+    # calculate the Pearson correlation between the learned tunings and place fields
+
+    learned_tuning_place_field_pearson_corr_all_combinations = calculate_all_column_correlations(learned_tunings, place_fields)    
+
+    # Pearson correlation between learned tunings and place fields of identical units
+    learned_tuning_place_field_pearson_corr = np.diag(learned_tuning_place_field_pearson_corr_all_combinations)
+
+
+   # statistical significance of the median of the distribution
+   #  
+    median_LT_PF_pearson_corr = dict()
+
+    median_LT_PF_pearson_corr["data"] = np.nanmedian(learned_tuning_place_field_pearson_corr)
+
+    # A null hypothesis is that the learend tuning for a unit is as correalted with its correposnding place fields 
+    # as it is with the place fiels of a randomly drawn unit. To test against this hypothesis we match each learned tuning
+    # with a place field of a random unit and calaculte the correlation between them
+
+    median_LT_PF_pearson_corr["PF_unit_IDX_shuffle"] = np.empty((num_shuffles,))
+
+    for i_shuffle in range(num_shuffles):
+        random_data = random_column_sampling(learned_tuning_place_field_pearson_corr_all_combinations)
+        median_LT_PF_pearson_corr["PF_unit_IDX_shuffle"][i_shuffle] = np.nanmedian(random_data)
+
+    p_value = len(np.where(median_LT_PF_pearson_corr["PF_unit_IDX_shuffle"] > median_LT_PF_pearson_corr["PF_unit_IDX_shuffle"])[0]) / num_shuffles * 100
+
+    return learned_tuning_place_field_pearson_corr, median_LT_PF_pearson_corr, p_value 
+
