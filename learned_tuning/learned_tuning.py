@@ -187,6 +187,7 @@ def calculate_all_column_correlations(matrix1, matrix2):
 
 import numpy as np
 
+
 def random_column_sampling(matrix):
     """
     Randomly samples a column for each row of a given matrix.
@@ -213,9 +214,24 @@ def random_column_sampling(matrix):
 
 def calculate_place_field_fidelity_of_learned_tuning(learned_tunings, place_fields, num_shuffles):
 
+    """"
+    calcualtes the place field fidelty of the learned tuning 
+
+    Args:
+    learned_tunings (np.ndarray): Learned tunings (num_units * num_pos_bins).
+    place_fields (np.ndarray): Place fields (num_units * num_pos_bins).
+    num_shuffles (int): Number of datasets and corresponding distribution of null distribution by shuffling the unit identities of the place fields when calculating the place field fidelities.
+
+Returns:
+    learned_tuning_place_field_pearson_corr (np.ndarray): 1-dimensional array of Pearson correlation coefficients between the learned tunings and the place fields (num_units,).
+    median_LT_PF_pearson_corr (dict): A dictionary with the following keys and values:
+        - "data": a scalar value representing the median Pearson correlation coefficient between the learned tunings and the place fields.
+        - "PF_unit_IDX_shuffle": a 1-dimensional array containing num_shuffles Pearson correlation coefficients between the shuffled place fields and the learned tunings.
+        - "p_value": a scalar value representing the p-value of the median Pearson correlation coefficient.
+    """
     # calculate the Pearson correlation between the learned tunings and place fields
 
-    learned_tuning_place_field_pearson_corr_all_combinations = calculate_all_column_correlations(learned_tunings, place_fields)    
+    learned_tuning_place_field_pearson_corr_all_combinations = calculate_all_column_correlations(np.transpose(learned_tunings), np.transpose(place_fields))    
 
     # Pearson correlation between learned tunings and place fields of identical units
     learned_tuning_place_field_pearson_corr = np.diag(learned_tuning_place_field_pearson_corr_all_combinations)
@@ -237,7 +253,7 @@ def calculate_place_field_fidelity_of_learned_tuning(learned_tunings, place_fiel
         random_data = random_column_sampling(learned_tuning_place_field_pearson_corr_all_combinations)
         median_LT_PF_pearson_corr["PF_unit_IDX_shuffle"][i_shuffle] = np.nanmedian(random_data)
 
-    p_value = len(np.where(median_LT_PF_pearson_corr["PF_unit_IDX_shuffle"] > median_LT_PF_pearson_corr["PF_unit_IDX_shuffle"])[0]) / num_shuffles * 100
+    median_LT_PF_pearson_corr["p_value"] = len(np.where(median_LT_PF_pearson_corr["PF_unit_IDX_shuffle"] >= median_LT_PF_pearson_corr["data"])[0]) / num_shuffles
 
-    return learned_tuning_place_field_pearson_corr, median_LT_PF_pearson_corr, p_value 
+    return learned_tuning_place_field_pearson_corr, median_LT_PF_pearson_corr 
 
