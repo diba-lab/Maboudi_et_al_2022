@@ -248,7 +248,7 @@ def calculate_learned_tuning_PBE_subsets(PBEs, spikes, PBE_subset_indices, L_rat
     del PBE_spike_counts_concat
 
     num_PBE_subset = len(PBE_subset_indices)
-    learned_tunings_PBE_subsets = np.zeros((num_units, num_pos_bins, num_PBE_subset))
+    learned_tunings_PBE_subsets = np.full((num_units, num_pos_bins, num_PBE_subset), np.nan)
 
     num_dots = int(num_active_units * (10/100)) # for printing how far we are in the calculations, what tenth of units have been processed 
     count = 0
