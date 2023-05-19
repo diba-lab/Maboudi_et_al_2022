@@ -328,6 +328,7 @@ def calculate_learned_tuning_PBE_subsets(PBEs, spikes, PBE_subset_indices, L_rat
 
 
 
+
 def calculate_all_column_correlations(matrix1, matrix2):
     """
     Calculates the correlation between each column of the first matrix with every other column of the second matrix,
@@ -354,14 +355,27 @@ def calculate_all_column_correlations(matrix1, matrix2):
         # Select the column of interest from the first matrix
         column1 = matrix1[:, i]
 
+        # Find indices of non-NaN values in column1
+        valid_indices = np.where(~np.isnan(column1))[0]
+
         # Loop through each column of the second matrix and calculate the correlation
         for j in range(matrix2.shape[1]):
-            corr = np.corrcoef(column1, matrix2[:, j])[0, 1]
+            # Select the column of interest from the second matrix
+            column2 = matrix2[:, j]
+
+            # Find indices of non-NaN values in column2
+            valid_indices2 = np.where(~np.isnan(column2))[0]
+
+            # Find the common indices between column1 and column2
+            # common_indices = np.intersect1d(valid_indices, valid_indices2)
+            common_indices = np.intersect1d(valid_indices[~np.isnan(column1[valid_indices])], valid_indices2[~np.isnan(column2[valid_indices2])])
+
+            # Calculate the correlation coefficient using the common indices
+            corr = np.corrcoef(column1[common_indices], column2[common_indices])[0, 1]
             correlations[i, j] = corr
 
     return correlations
 
-import numpy as np
 
 
 def random_column_sampling(matrix):
@@ -405,6 +419,9 @@ Returns:
         - "PF_unit_IDX_shuffle": a 1-dimensional array containing num_shuffles Pearson correlation coefficients between the shuffled place fields and the learned tunings.
         - "p_value": a scalar value representing the p-value of the median Pearson correlation coefficient.
     """
+
+    num_units = learned_tunings.shape[0]
+
     # calculate the Pearson correlation between the learned tunings and place fields
 
     learned_tuning_place_field_pearson_corr_all_combinations = calculate_all_column_correlations(np.transpose(learned_tunings), np.transpose(place_fields))    
@@ -423,13 +440,14 @@ Returns:
     # as it is with the place fiels of a randomly drawn unit. To test against this hypothesis we match each learned tuning
     # with a place field of a random unit and calaculte the correlation between them
 
+    learned_tuning_place_field_pearson_corr_PF_unit_ID_shuffle = np.empty((num_units, num_shuffles))
     median_LT_PF_pearson_corr["PF_unit_IDX_shuffle"] = np.empty((num_shuffles,))
 
     for i_shuffle in range(num_shuffles):
-        random_data = random_column_sampling(learned_tuning_place_field_pearson_corr_all_combinations)
-        median_LT_PF_pearson_corr["PF_unit_IDX_shuffle"][i_shuffle] = np.nanmedian(random_data)
+        learned_tuning_place_field_pearson_corr_PF_unit_ID_shuffle[:, i_shuffle] = random_column_sampling(learned_tuning_place_field_pearson_corr_all_combinations)
 
+    median_LT_PF_pearson_corr["PF_unit_IDX_shuffle"] = np.nanmedian(learned_tuning_place_field_pearson_corr_PF_unit_ID_shuffle, axis = 0)
     median_LT_PF_pearson_corr["p_value"] = len(np.where(median_LT_PF_pearson_corr["PF_unit_IDX_shuffle"] >= median_LT_PF_pearson_corr["data"])[0]) / num_shuffles
 
-    return learned_tuning_place_field_pearson_corr, median_LT_PF_pearson_corr 
+    return learned_tuning_place_field_pearson_corr, learned_tuning_place_field_pearson_corr_PF_unit_ID_shuffle, median_LT_PF_pearson_corr 
 
