@@ -20,7 +20,17 @@ def cal_unit_learned_tuning(posterior_prob, unit_spike_counts_concat):
 
     return unit_learned_tuning
 
-
+def gini(x):
+    # Mean absolute difference 
+    mad = np.abs(np.subtract.outer(x,x)).mean()
+    # Relative mean absoulte difference 
+    if np.mean(x) > 0:
+        rmad = mad/np.mean(x)
+    else:
+        rmad = np.nan
+    # Gini coefficient 
+    g = 0.5*rmad
+    return g
 
 def calculate_learned_tuning(PBEs, spikes, L_ratios, time_bin_duration):
 
@@ -102,13 +112,21 @@ def calculate_learned_tuning(PBEs, spikes, L_ratios, time_bin_duration):
         
     # concatenate the spike counts per time bin across all PBEs 
     PBE_spike_counts_concat = np.concatenate(PBE_each_bin_spike_counts, axis=1)
-
+    num_time_bins = PBE_spike_counts_concat.shape[1]
 
     active_units = np.where(np.sum(PBE_spike_counts_concat, axis=1) > 0)[0] # detect units that fired at least once during the PBEs
     num_active_units = len(active_units)
 
+    num_pos_bins_interp = 200
+    interp_pos_bins = np.linspace(0, num_pos_bins, num_pos_bins_interp)
+
     # num_coactive_units_with_each_unit = np.zeros((num_units, 1))
     learned_tunings = np.zeros((num_units, num_pos_bins))
+    gini_coeff = np.full((num_units, num_time_bins), np.nan)
+
+
+    num_dots = int(num_active_units * 0.1) # for printing how far we are in the calculations, what tenth of units have been processed 
+    count = 0
 
     warning_flag = 0
     for unit in range(num_active_units):
@@ -137,7 +155,7 @@ def calculate_learned_tuning(PBEs, spikes, L_ratios, time_bin_duration):
                     print("Correct shank was found") if warning_flag == 0 else None
                     curr_unit_shank_id = shank_id
                     break
-            warnnig_flag += 1
+            warning_flag += 1
 
         less_than_L_ratio_thresh = L_ratios[curr_unit_shank_id]['L_ratios'][:, idx] < L_ratio_thresh
         accepted_clusters = L_ratios[curr_unit_shank_id]['cluster_ids'][less_than_L_ratio_thresh]
@@ -161,18 +179,30 @@ def calculate_learned_tuning(PBEs, spikes, L_ratios, time_bin_duration):
             posterior_prob_LR = Bayesian_decoder(other_units_PBE_spike_counts, place_fields_LR[other_units, :], time_bin_duration)
             
             posterior_prob = posterior_prob_RL + posterior_prob_LR
-            posterior_prob = posterior_prob/np.tile(np.sum(posterior_prob, axis=0), (num_pos_bins, 1))
-            
-            learned_tunings[curr_unit, :] = cal_unit_learned_tuning(posterior_prob, unit_PBE_spike_counts_concat)
             
         else:  
                     
             posterior_prob = Bayesian_decoder(other_units_PBE_spike_counts, place_fields[other_units, :], time_bin_duration)
-            posterior_prob = posterior_prob/np.tile(np.sum(posterior_prob, axis=0), (num_pos_bins, 1))
-            
-            learned_tunings[curr_unit, :] = cal_unit_learned_tuning(posterior_prob, unit_PBE_spike_counts_concat)
+        
+        posterior_prob = posterior_prob/np.tile(np.sum(posterior_prob, axis=0), (num_pos_bins, 1))
 
-    return learned_tunings
+
+        # Calculate the gini coeff for the posteriors
+        # Including only the time bins during which the unit fired
+        firing_time_bins = np.where(unit_PBE_spike_counts_concat > 0)[0]
+        for time_bin in firing_time_bins:
+            posterior_prob_interp = np.interp(interp_pos_bins, np.arange(0, num_pos_bins), posterior_prob[:, time_bin])
+            gini_coeff[curr_unit, time_bin] = gini(posterior_prob_interp)
+
+        learned_tunings[curr_unit, :] = cal_unit_learned_tuning(posterior_prob, unit_PBE_spike_counts_concat)
+
+        if (unit+1) % num_dots == 1:
+            count += 1
+            message = "." * count
+            print(message, end="\r")
+
+
+    return learned_tunings, gini_coeff
 
 
 def calculate_learned_tuning_individual_ripples(PBEs, spikes, L_ratios, time_bin_duration):
@@ -246,7 +276,6 @@ def calculate_learned_tuning_individual_ripples(PBEs, spikes, L_ratios, time_bin
 
     L_ratio_thresh = 1e-3
     
-
     num_PBEs = PBEs.shape[0]
     
     PBE_each_bin_spike_counts = []
@@ -321,17 +350,14 @@ def calculate_learned_tuning_individual_ripples(PBEs, spikes, L_ratios, time_bin
                 posterior_prob_LR = Bayesian_decoder(other_units_PBE_spike_counts, place_fields_LR[other_units, :], time_bin_duration)
                 
                 posterior_prob = posterior_prob_RL + posterior_prob_LR
-                posterior_prob = posterior_prob/np.tile(np.sum(posterior_prob, axis=0), (num_pos_bins, 1))
                 
-
-                # learned_tunings[curr_unit, :, pbe] = cal_unit_learned_tuning(posterior_prob, unit_PBE_spike_counts)
-                learned_tunings.at[pbe][unit, :] = cal_unit_learned_tuning(posterior_prob, unit_PBE_spike_counts)
             else:                    
                 posterior_prob = Bayesian_decoder(other_units_PBE_spike_counts, place_fields[other_units, :], time_bin_duration)
-                posterior_prob = posterior_prob/np.tile(np.sum(posterior_prob, axis=0), (num_pos_bins, 1))
-                
-                # learned_tunings[curr_unit, :, pbe] = cal_unit_learned_tuning(posterior_prob, unit_PBE_spike_counts)
-                learned_tunings.at[pbe][unit, :] = cal_unit_learned_tuning(posterior_prob, unit_PBE_spike_counts)
+            
+
+            posterior_prob = posterior_prob/np.tile(np.sum(posterior_prob, axis=0), (num_pos_bins, 1))
+
+            learned_tunings.at[pbe][unit, :] = cal_unit_learned_tuning(posterior_prob, unit_PBE_spike_counts)
 
 
         if (unit+1) % num_dots == 1:
@@ -455,7 +481,7 @@ def calculate_learned_tuning_PBE_subsets(PBEs, spikes, PBE_subset_indices, L_rat
                     print("Correct shank was found") if warning_flag == 0 else None
                     curr_unit_shank_id = shank_id
                     break
-            warnnig_flag += 1
+            warning_flag += 1
 
 
         less_than_L_ratio_thresh = L_ratios[curr_unit_shank_id]['L_ratios'][:, idx] < L_ratio_thresh
@@ -707,9 +733,17 @@ def calculate_learned_tuning_matched_participation(PBEs, spikes, PBE_subset_indi
                 learned_tunings['post'][curr_unit] = curr_unit_learned_tunings[1]
 
 
-        else: # if the PBE_subset_indices is already a list
+        else: # if the PBE_subset_indices is already a list. For example to calculate learned tunings in 15 minutes times windows or for PBE subsets corresponding to different quartiles of replay score
             PBE_subset_indices_to_match_firing = PBE_subset_indices
+            num_subsets = len(PBE_subset_indices)
 
+            curr_unit_learned_tunings = cal_learned_tuning_PBE_indices(posterior_prob, unit_PBE_spike_counts, PBE_subset_indices_to_match_firing)
+
+            if unit == 0:
+                learned_tunings = np.full((num_units, num_pos_bins, num_subsets), np.nan)
+
+            for subset_index in range(num_subsets):
+                learned_tunings[curr_unit, :, subset_index] = curr_unit_learned_tunings[subset_index]
 
         if (unit+1) % num_dots == 1:
                 count += 1
@@ -774,6 +808,255 @@ def cal_learned_tuning_PBE_indices(posterior_prob, unit_PBE_spike_counts, PBE_su
                 )
             
     return learned_tunings_PBE_subsets
+
+
+def calculate_learned_tuning_matched_num_firing_bins_matched_cofiring_units(events, spikes, L_ratios, time_bin_duration):
+    """
+
+    Investigate contrasnt in learned tunings between PBEs and REM bouts by matching the number of time bins during which each unit fired and mean number of cofiring units by averaging over the time bins 
+
+    Parameters:
+    -----------
+    events: list 
+        A list of pandas dataframes corresponding to different sets of PBEs or time windows from other sleep/brain states such as REM
+    spikes: list
+        A list of dictionaries containing spike information inclduing the place fields for each unit
+    L_ratios: list 
+        A list of dictionaries containing L ratio between pairs of units on the same shank
+    time_bin_duration: float
+        The duration of each time bin in seconds.
+
+    Returns:
+    --------
+    learned_tunings: array
+        An array of learned tuning curves, where each row corresponds to a unit and each column corresponds to a spatial bin.
+    """
+
+
+    # make sure the units are matched between spikes and PBEInfo.fr_20msbin
+    if len(spikes) != events[0].at[0,'fr_20msbin'].shape[1]:
+        raise ValueError('There is a mismatch in number of units between spikes and PBEInfo.fr_20msbin')
+    
+    num_units = len(spikes)
+
+    shank_ids = np.zeros((num_units, 1))
+    cluster_ids = np.zeros((num_units, 1))
+
+    for unit in range(num_units):
+        shank_ids[unit]   = spikes[unit]['shank_id']-1 # because the shank indexing for in the L-ratios array starts at 0
+        cluster_ids[unit] = spikes[unit]['cluster_id']
+    
+    # place fields of each unit needed for calculating the posteriors 
+    if 'RL' in spikes[0]['place_fields']:
+        two_place_fields_flag = 1
+        num_pos_bins = len(spikes[0]['place_fields']['RL'])
+        
+        place_fields_RL = np.zeros((num_units, num_pos_bins))
+        place_fields_LR = np.zeros((num_units, num_pos_bins))
+        for unit in range(num_units):
+            place_fields_LR[unit, :] = spikes[unit]['place_fields']['LR']
+            place_fields_RL[unit, :] = spikes[unit]['place_fields']['RL']
+            
+        place_fields_LR[place_fields_LR == 0] = 1e-4
+        place_fields_RL[place_fields_RL == 0] = 1e-4
+    else:
+        two_place_fields_flag = 0
+        num_pos_bins = len(spikes[0]['place_fields']['uni'])
+        
+        place_fields = np.zeros((num_units, num_pos_bins))
+        for unit in range(num_units):
+            place_fields[unit, :] = spikes[unit]['place_fields']['uni']
+            
+        place_fields[place_fields == 0] = 1e-4
+
+    L_ratio_thresh = 1e-3
+
+
+    #-------------------------------------------------------------------------------------------------------------------------
+    # spike counts in 20 ms time bins within each event_dataframe
+
+    num_event_dataframe = len(events)
+    events_spike_counts_concat = [[] for _ in range(num_event_dataframe)]
+
+    for event_df_index, event_df in enumerate(events):
+        
+        num_events = event_df.shape[0]
+        events_spike_counts = []
+        for pbe in range(num_events):
+            events_spike_counts.append(event_df.at[pbe, 'fr_20msbin'].transpose())
+                
+        # concatenate the spike counts per time bin across all events within the dataframe 
+        events_spike_counts_concat[event_df_index] = np.concatenate(events_spike_counts, axis=1)
+
+
+    active_units = np.where(np.sum(np.concatenate(events_spike_counts_concat), axis=1) > 0)[0] # units that fired at least once during the events
+    num_active_units = len(active_units)
+
+    num_dots = int(num_active_units * 0.1) # for printing how far we are in the calculations, what tenth of units have been processed 
+    count = 0
+    warning_flag = 0
+
+    learned_tunings = [np.zeros((num_units, num_pos_bins)) for _ in range(num_event_dataframe)] 
+
+    for unit in range(num_active_units):
+        
+        curr_unit = active_units[unit]
+        
+        curr_unit_cluster_id = cluster_ids[curr_unit]
+        curr_unit_shank_id = shank_ids[curr_unit]
+        
+        curr_unit_cluster_id = curr_unit_cluster_id.astype(int)[0]
+        curr_unit_shank_id   = curr_unit_shank_id.astype(int)[0]
+
+        included_units_from_other_shanks = np.where(shank_ids[:, 0] != curr_unit_shank_id)[0]
+        
+        idx = np.where(L_ratios[curr_unit_shank_id]['cluster_ids'] == curr_unit_cluster_id)[0]
+        if idx.size == 0:
+            warnings.warn("Warning: attempting to read L-ratios from a different shank than the one on which the unit was recorded!") if warning_flag == 0 else None
+
+            # Find the right shank id
+            for shank_id in range(np.max(curr_unit_shank_id-2, 0), curr_unit_shank_id+3):
+    
+                idx = np.where(L_ratios[shank_id]['cluster_ids'] == curr_unit_cluster_id)[0]
+
+                if idx.size > 0:
+                    print("Correct shank was found") if warning_flag == 0 else None
+                    curr_unit_shank_id = shank_id
+                    break
+            warnnig_flag += 1
+
+        less_than_L_ratio_thresh = L_ratios[curr_unit_shank_id]['L_ratios'][:, idx] < L_ratio_thresh
+        accepted_clusters = L_ratios[curr_unit_shank_id]['cluster_ids'][less_than_L_ratio_thresh]
+      
+        
+        included_units_from_same_shank = np.where((shank_ids == curr_unit_shank_id) & np.isin(cluster_ids, accepted_clusters))[0]
+        
+        other_units = np.concatenate((included_units_from_other_shanks, included_units_from_same_shank))
+        other_units = np.sort(other_units)
+
+
+
+        
+
+        # Match the number of firing time bins by subselecting the firing time bins and Match mean number of cofiring units in the subselected time bins
+        # by progressively dropping spikes from them 
+        
+        # minimum number of co-firing units required for inclusion in calculation of learned tuning
+        min_number_of_cofiring_unit = 1 
+
+        current_unit_spike_counts = [[] for _ in range(num_event_dataframe)] 
+        other_units_spike_counts = [[] for _ in range(num_event_dataframe)]
+        bins_with_unit_firing = [[] for _ in range(num_event_dataframe)]
+        num_bins_with_unit_firing = np.full((num_event_dataframe,), np.nan)
+
+        # loop through event dataframes
+        for event_df_index in range(num_event_dataframe):
+            current_unit_spike_counts[event_df_index] =  events_spike_counts_concat[event_df_index][curr_unit]
+            other_units_spike_counts[event_df_index] = events_spike_counts_concat[event_df_index][other_units]
+
+            # Filter time bins with minimum co-firing units
+            time_bins_with_minimum_cofiring_unit = other_units_spike_counts[event_df_index] > min_number_of_cofiring_unit
+
+            # update spike counts based on filtered time bins
+            current_unit_spike_counts[event_df_index] = current_unit_spike_counts[event_df_index][time_bins_with_minimum_cofiring_unit]
+            other_units_spike_counts[event_df_index] = other_units_spike_counts[event_df_index][time_bins_with_minimum_cofiring_unit]
+
+            # find bins with current unit firing
+            bins_with_unit_firing[event_df_index] = np.where(current_unit_spike_counts[event_df_index] > 0)[0]
+            num_bins_with_unit_firing[event_df_index] = bins_with_unit_firing.shape[0]
+
+        
+        
+        # get the minimum number of time bins
+        matching_num_bins = np.min(num_bins_with_unit_firing).astype('int')
+
+        if matching_num_bins > 0: 
+            # subselect equal number of time bins from each event dataframe and then quantify how many units cofired with the current unit in the subselected time bins
+            curr_unit_mean_cofiring_unit_count = np.full((num_event_dataframe,), np.nan)
+            for event_df_index in range(num_event_dataframe):
+
+                # subslect matching number of time bins from all event dataframes
+                column_indices = list(range(num_bins_with_unit_firing[event_df_index]))
+                sampled_bins_idx = random.sample(column_indices, matching_num_bins)
+                bins_with_unit_firing_subsample_idx = bins_with_unit_firing[event_df_index][[i for i in sampled_bins_idx]]
+
+                current_unit_spike_counts[event_df_index] = current_unit_spike_counts[event_df_index][bins_with_unit_firing_subsample_idx]
+                other_units_spike_counts[event_df_index] = other_units_spike_counts[event_df_index][:, bins_with_unit_firing_subsample_idx]
+
+
+                # Now we need to quantify the average number of units cofired with the current unit in the current event dataframe, in the subsampled data
+                cofiring_unit_count = np.sum(other_units_spike_counts[event_df_index] != 0, axis=0)
+                num_cofiring_units_per_time_bin_min_one_cofiring_unit = cofiring_unit_count[cofiring_unit_count > 0]
+                
+                if num_cofiring_units_per_time_bin_min_one_cofiring_unit.shape[0] > 0:
+                    curr_unit_mean_cofiring_unit_count[event_df_index] = num_cofiring_units_per_time_bin_min_one_cofiring_unit.shape[0]
+
+            
+
+            # Subsample from the co-firing units to match the number of cofiring units among the event dataframes
+            matching_num_cofiring_units = np.min(curr_unit_mean_cofiring_unit_count).astype('int')
+
+            if matching_num_cofiring_units > 0: # if the matching number of cofiring units is zero then no learned tuning is calculated for the current unit
+
+                mean_cofiring_unit_count_ratio = np.full((num_event_dataframe,), np.nan)
+                for event_df_index in range(num_event_dataframe):
+                    mean_cofiring_unit_count_ratio[event_df_index] = curr_unit_mean_cofiring_unit_count[event_df_index]/matching_num_cofiring_units
+
+
+                # Now based on the ratio calculated above for each event dataframe, subsample from the cofiring units in each time bin to match the minimum number of cofiring units in each event dataframe 
+                for event_df_index in range(num_event_dataframe):
+                    spike_count_array = other_units_spike_counts[event_df_index]
+
+                    # Get indices of non-zero elements: indices of units and time bins where we have spiking
+                    non_zero_indices = np.argwhere(spike_count_array != 0)
+                    
+                    # Randomly select indices to retain, based on the mean_cofiring_unit_count_ratio that was calculated in the previous step 
+                    target_non_zero_count = int(1/mean_cofiring_unit_count_ratio[event_df_index] * non_zero_indices.shape[0])
+                    selected_indices = np.random.choice(len(non_zero_indices), target_non_zero_count, replace=False)
+
+                    # Create a new spike_count_array with randomly selected non-zero elements
+                    reduced_spike_count_array = np.zeros_like(spike_count_array)
+                    for index in selected_indices:
+                        i,j = non_zero_indices[index]
+                        reduced_spike_count_array[i, j] = spike_count_array[i, j]
+
+                    other_units_spike_counts[event_df_index] = reduced_spike_count_array
+
+                # Test if the mean number of cofiring units are now equal between the event dataframes
+                curr_unit_mean_cofiring_unit_count = np.full((num_event_dataframe,), np.nan)
+                for event_df_index in range(num_event_dataframe):
+                    cofiring_unit_count = np.sum(other_units_spike_counts[event_df_index] != 0, axis=0)
+                    num_cofiring_units_per_time_bin_min_one_cofiring_unit = cofiring_unit_count[cofiring_unit_count > 0]
+                    
+                    if num_cofiring_units_per_time_bin_min_one_cofiring_unit.shape[0] > 0:
+                        curr_unit_mean_cofiring_unit_count[event_df_index] = num_cofiring_units_per_time_bin_min_one_cofiring_unit.shape[0]
+
+
+
+                # Calculate the posteriors for the current unit based on each event dataframe
+                posterior_prob = [[] for _ in range(num_event_dataframe)]
+                for event_df_index in range(num_event_dataframe):
+                    if two_place_fields_flag == 1:
+                        posterior_prob_RL = Bayesian_decoder(other_units_spike_counts[event_df_index], place_fields_RL[other_units, :], time_bin_duration)
+                        posterior_prob_LR = Bayesian_decoder(other_units_spike_counts[event_df_index], place_fields_LR[other_units, :], time_bin_duration)
+                        
+                        posterior_prob = posterior_prob_RL + posterior_prob_LR
+                        
+                    else:
+                        posterior_prob = Bayesian_decoder(other_units_spike_counts[event_df_index], place_fields[other_units, :], time_bin_duration)
+                        
+                    posterior_prob = posterior_prob/np.tile(np.sum(posterior_prob, axis=0), (num_pos_bins, 1))
+                    
+                    learned_tunings[event_df_index][curr_unit, :] = cal_unit_learned_tuning(posterior_prob, current_unit_spike_counts[event_df_index])
+
+
+        if (unit+1) % num_dots == 1:
+                count += 1
+                message = "." * count
+                print(message, end="\r")
+
+    return learned_tunings
+
 
 
 def cal_unit_learned_tuning_with_p_of_x(posterior_prob, unit_spike_counts_concat, p_of_x):
